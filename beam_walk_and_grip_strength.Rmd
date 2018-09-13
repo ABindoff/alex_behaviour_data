@@ -1,0 +1,239 @@
+---
+title: "Behaviour data, Beam Walk"
+author: "Bindoff, A., Sellas, A."
+date: "13 September 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,results = "hold")
+
+```
+
+Behaviour data were supplied as an Excel file with a sheet for each experiment. AB added two columns titled `exclude` and `comments`. The `comments` column had comments left by AS that were informative, and the `exclude` column was empty except for rows where the comments recommended to exclude the data. These rows were given a 1 so that they were easy to filter out.  
+
+We begin by loading some packages that we will use. Packages are software libraries that R users have contributed so that others can use them. For example, the ggplot2 library has a range of useful plotting functions so that we can explore the data and produce publication-ready figures.  
+
+To install a new library for the first time or to update a library, run  
+install.packages("package_name")
+
+e.g install.packages("ggplot2")
+
+```{r libs}
+library(ggplot2)  # for plotting
+library(ggbeeswarm) # make beeswarm plots
+library(reshape2) # to convert wide format data to long form (or vice versa)
+library(dplyr)    # for transforming and summarising data more easily
+library(openxlsx) # for reading in sheets from Excel files
+library(lme4)     # for mixed effects models
+library(lmerTest) # F-tests for mixed effects models fitted with lme4
+```
+
+Now we will load the beam walk data using `openxlsx`. `head()` gives us the first 6 lines so we can quickly check that column names are all there and the data has been read in correctly.  
+
+```{r beam walk data}
+bw <- read.xlsx("NFLKO_Motor data_Results_2018.xlsx", sheet = 1)
+bw$genotype <- factor(bw$genotype, levels = c("control", "tg"))
+bw$month <- factor(bw$month)
+head(bw)
+```
+
+We can use the `dplyr` function `filter` to filter out rows with a 1 in the `exclude` column. I am in the habit of typing out the package name and function because lots of packages have `filter` functions and I want to make sure that R knows to call this function from the `dplyr` library (not the '::' between package name and function name)  
+
+```{r exclusions}
+cat("\nrows before filter = ", nrow(bw))  # check number of rows before we filter
+bw <- dplyr::filter(bw, is.na(exclude))   # "filter all rows from bw where exclude = NA"
+cat("\nrows after filter = ", nrow(bw))   # check number of rows after we filter
+```
+
+You can view all of your beam walk data in the RStudio data viewer by running  
+View(bw)  
+  
+Because we will be using a repeated measures analysis, we want our data to be in "long" form, with each trial per animal on a different row, and each measure in a different table.  
+
+```{r reshape}
+slip <- select(bw, id, genotype, month, ends_with("slip")) %>% 
+  melt(id.vars = c("id", "genotype", "month"), na.rm = FALSE)
+synch <- select(bw, id, genotype, month, ends_with("synch")) %>%
+    melt(id.vars = c("id", "genotype", "month"), na.rm = FALSE)
+timed <- select(bw, id, genotype, month, ends_with("time")) %>%
+    melt(id.vars = c("id", "genotype", "month"), na.rm = FALSE)
+
+head(timed)
+```
+
+We now have two new columns, `variable` which tells us which trial the row is for and `value` which tells us the time taken (in this case).  
+
+We can plot the data to get a sense of what's happening, and also to check for any problems. Let's start with slips-  
+
+```{r descriptive plots}
+ggplot(slip, aes(x = month, y = value, colour = genotype)) +
+  geom_quasirandom() +
+  ylab("Number of slips") +
+  theme_bw()
+```
+
+It's pretty clear that the data are not normally distributed. In fact they are counts, so this is not surprising at all, as counts are often better described by a Poisson function. It looks like there is an effect of month, but it's not linearly increasing. Months 2, 3, and 4 are different to month 1 but fairly similar to each other.  
+
+Let's see if the time measure looks any more normally distributed.  
+
+```{r}
+ggplot(timed, aes(x = month, y = value, colour = genotype)) +
+  geom_quasirandom() +
+    ylab("Time (s)") +
+  theme_bw()
+
+```
+
+Unfortunately no, but a log transformation often helps so we'll try this. I've also added some custom colours so that you can make your own figures however you like them.  
+
+```{r}
+ggplot(timed, aes(x = month, y = value, colour = genotype)) +
+  geom_quasirandom() +
+  scale_y_continuous(trans = "log", breaks = c(5, 10, 20, 40)) +
+  scale_colour_manual(values = c("red", "dodgerblue3")) +
+  ylab("Time (s)") +
+  theme_bw()
+
+```
+
+Again, a similar pattern to the slips data. Month 1 is different, there is not a linear increase over each month. There might possibly be more of an effect for tg mice than for controls, and it's possible that we might be seeing a "frowny face" pattern over time.  
+
+
+### Analysis
+
+Let's start with slips, because this is a tricky one. An assumption of most statistical tests that you learn in undergrad is that the observations are independent. Clearly this is not the case here, for each animal you have 3 observations (t1, t2, t3) at each time point, and 4 time points (month 1, month 2, ..). One way to deal with this is to use repeated measures analysis, but you have two violations of independence - multiple observations at each month. You could average the observations at each month, and this is a good way to solve the problem but it throws away information about how much the observations at each month vary.  
+
+The analysis that we're going to use is called a mixed effects model or multilevel model. This approach treats clustering or dependence in the data as a different "level" of the data. We can relax the assumption of independence by estimating a mean and variance for each animal at each time point. We call this the "random" or "group level" effect.
+
+The treatment (genotype in your experiment) we call the "fixed" or "population level" effect. Because the model includes both fixed and random effects it is sometimes called a mixed effects model.  
+
+Let's start with a model that estimates the effect of genotype on number of slips, estimating a mean (and variance) for each animal at each month.
+
+
+```{r}
+m1 <- lmer(value ~ genotype + month + (month|id), slip)
+round(summary(m1)$coefficients, 3)
+```
+
+I've printed the estimated fixed effects in a table that tells us that, adjusting for genotype, mice make 1.54 slips extra per month, and adjusting for month, `tg` mice make 5.03 slips more than `control` mice. Both of these effects are significant, p < .001.  
+
+An assumption of the model is that the residuals are normally distributed. This means that the observations are scattered normally around their means such that 64% of observations fall within 1 standard deviation, 95% within 2 standard deviations and so on. We can check this assumption with a quantile-quantile plot (Q-Q plot). The residuals should all fall within the expected quantiles so if we plot their empri
+
+
+
+```{r}
+qqnorm(resid(m1))
+qqline(resid(m1))
+
+```
+
+These assumptions are obviously quite severely violated, so let's look a little closer at this problem.  
+
+The model predictions aren't too bad, it doesn't make unreasonable predictions. We can check these by quickly adding up the coefficients: intercept + genotype + month_x and see that the model predicts a tg mouse at month 5 to slip 8-9 times, and a control mouse at month 1 to slip 0.11 times. If we predict values from the model and plot these against the observed values this is a good check of how sensible the model esimates are. The closer the points are to the line the better the predictions/fit.  
+
+```{r}
+slip$lm.pr <- predict(m1, slip)
+
+plot(value ~ lm.pr, slip, col = genotype)
+abline(0, 1)
+
+```
+
+
+We can also model this data assuming the data are drawn from a Poisson distribution (a very reasonable assumption because counts often are). We can do this with a generalised linear mixed model (GLMM). This is almost the same thing as the linear mixed model except that we use a Poisson "link function" which maps the count distribution back to a normal distribution so that we get good estimates and valid p-values.  
+
+```{r}
+m2 <- glmer(value ~ genotype + month + (month|id), slip, family = "poisson")
+slip$glmm.pr <- predict(m2, slip, type = "response")
+```
+
+```{r}
+qqnorm(resid(m2))
+qqline(resid(m2))
+```
+
+Much better! How well does the model predict counts?
+
+```{r}
+plot(value ~ glmm.pr, slip, col = genotype)
+abline(0,1)
+
+```
+
+The model predictions are incredibly close to the linear model (nearly identical).  P-values are a bit trickier, we need to compare the model with another model that doesn't have the term we want the p-value for.  
+
+```{r}
+m2_null_geno <- glmer(value ~ month + (month|id), slip, family = "poisson")
+m2_null_month <- glmer(value ~ genotype + (month|id), slip, family = "poisson")
+
+anova(m2, m2_null_geno)
+
+anova(m2, m2_null_month)
+```
+
+
+This is called a "likelihood ratio test", and we report the Chi-squared statistic with degrees of freedom like so,
+
+"There was a significant effect of genotype $\chi^2_1 = 34.2, p < .001$ and month $\chi^2_3 = 33.8, p < .001$..."  
+
+It's also important to report the strength and direction of the effects, so let's have a look at the co-efficients for month (averaged over the levels of genotype)  
+
+```{r}
+lsmeans::lsmeans(m2, specs = "month", transform = "response")
+```
+
+...and for genotype (averaged over the levels of month)  
+
+```{r}
+lsmeans::lsmeans(m2, specs = "genotype", transform = "response")
+```
+
+The rate is the number of slips per trial, so for example you might write up  
+
+"Averaging over all months, control mice slipped 1.2 times per trial (95%CI 0.7, 1.7) while tg mice slipped 7.4 times per trial (95%CI 5.6, 9.3)..."  
+
+These results are intrepretable showing both the strength and direction of the effect in the units that they were observed, and reporting a measure of uncertainty in the estimates.  
+
+#### Time
+
+Let's begin by fitting a linear mixed effects model as we did initially for the steps data, but we'll also fit a model with log-transformed time.  
+
+```{r}
+timed$month <- factor(timed$month)
+m3.lin <- lmer(value ~ genotype + month + (month|id), timed)
+m3.log <- lmer(log(value) ~ genotype + month + (month|id), timed)
+```
+
+```{r}
+par(mfrow = c(1, 2))
+qqnorm(resid(m3.lin), main = "linear")
+qqline(resid(m3.lin))
+
+qqnorm(resid(m3.log), main = "log")
+qqline(resid(m3.log))
+
+```
+
+Let's check genotype * month interaction and compare with the main effects model, m3.log  
+
+```{r}
+m3.int <- lmer(log(value) ~ genotype*month + (month|id), timed)
+anova(m3.int, m3.log)
+
+```
+
+The model with the interaction term is significantly better. We don't need to report the Chisq statistic like we did for the GLMM here, we can calculate an F-statistic for the interaction term, and estimate the strength and direction of effects -  
+
+
+```{r}
+nd <- expand.grid(genotype = factor(c("control", "tg")),
+                  month = factor(c(1, 2, 3, 4)))
+nd$fit <- round(exp(predict(m3.int, nd, re.form = NA)), 1)
+nd
+anova(m3.int)
+```
+
+I would report like this -  
+
+"There was a significant interaction between genotype and month (F(3, 20.2) = 12.3, p < .001) and significant main effect of month (F(3, 20.2) = 30.0, p < .001) and genotype (F...). After adjusting for the main effects of month (see Table x), tg mice took on average between 7.0 and 10.7 seconds longer (approximately) to cross the beam than control mice in months 2, 3, and 4, and just 1.8 seconds longer at month 1."
