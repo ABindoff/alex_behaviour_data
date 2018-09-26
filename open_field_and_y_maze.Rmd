@@ -1,0 +1,235 @@
+---
+title: "Open Field and Y-maze"
+author: "Bindoff, A., Sella, A."
+date: "26 September 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,results = "hold")
+
+```
+
+Behaviour data were supplied as an Excel file with a sheet for each experiment.
+
+```{r libs}
+library(ggplot2)  # for plotting
+library(ggbeeswarm) # make beeswarm plots
+library(reshape2) # to convert wide format data to long form (or vice versa)
+library(dplyr)    # for transforming and summarising data more easily
+library(openxlsx) # for reading in sheets from Excel files
+library(lme4)     # for mixed effects models
+library(lmerTest) # F-tests for mixed effects models fitted with lme4
+```
+
+## Open field
+
+Load open field experiment data.  
+
+```{r beam walk data}
+of <- read.xlsx("nfl_open_field_and_y_maze_data.xlsx", sheet = 1)
+of$genotype <- factor(of$genotype, levels = c("wt", "nfl_ko"))
+of$month <- factor(of$month)
+of$animal_id <- factor(of$animal_id)
+head(of)
+```
+
+Filter out rows with a 1 in the `exclude` column.   
+
+
+```{r exclusions1}
+cat("\nrows before filter = ", nrow(of))  # check number of rows before we filter
+of <- dplyr::filter(of, is.na(exclude))   # "filter all rows from bw where exclude = NA"
+cat("\nrows after filter = ", nrow(of))   # check number of rows after we filter
+```
+
+The data were provided in long format so we don't need to "melt" it.  
+
+We can plot the data to get a sense of what's happening, and also to check for any problems.  
+
+```{r descriptive plots1}
+ggplot(of, aes(x = month, y = distance_covered_in_.centre_cm, colour = genotype)) +
+  #geom_boxplot() +
+    geom_quasirandom() +
+  scale_colour_manual(values = c("black", "red")) +
+  ylab("Distance covered (cm)") +
+  theme_bw()
+```
+
+
+```{r}
+ggplot(of, aes(x = month, y = `velocity.cm/s`, colour = genotype)) +
+  #geom_boxplot() +
+    geom_quasirandom() +
+  scale_colour_manual(values = c("black", "red")) +
+  ylab("Velocity (cm/s)") +
+  theme_bw()
+```
+
+```{r}
+ggplot(of, aes(x = month, y = cumulative_duration_in_centre_from_centre_point_sec, colour = genotype)) +
+  geom_boxplot() +
+  #  geom_quasirandom() +
+  scale_colour_manual(values = c("black", "red")) +
+  ylab("Cumulative duration in centre (s)") +
+  theme_bw()
+```
+
+
+
+### Analysis
+
+
+```{r}
+m1 <- lmer(distance_covered_in_.centre_cm ~ genotype + month + (1|animal_id), of)
+round(summary(m1)$coefficients, 3)
+```
+
+Report 95% CIs and F-statistics  
+
+```{r}
+confint(m1)
+anova(m1)
+```
+
+Check assumption of normality of residuals  
+
+```{r}
+qqnorm(resid(m1))
+qqline(resid(m1))
+
+```
+
+
+```{r}
+m2 <- lmer(`velocity.cm/s` ~ genotype + month + (1|animal_id), of)
+round(summary(m2)$coefficients, 3)
+confint(m2)
+anova(m2)
+```
+
+```{r}
+qqnorm(resid(m2))
+qqline(resid(m2))
+```
+
+```{r}
+m3 <- lmer(cumulative_duration_in_centre_from_centre_point_sec ~ genotype + month + (1|animal_id), of)
+round(summary(m3)$coefficients, 3)
+confint(m3)
+anova(m3)
+```
+
+```{r}
+qqnorm(resid(m3))
+qqline(resid(m3))
+```
+
+## Y-maze
+
+Load Y-maze experiment data.  
+
+```{r y maze data}
+ym <- read.xlsx("nfl_open_field_and_y_maze_data.xlsx", sheet = 2)
+ym$genotype <- factor(ym$genotype, levels = c("wt", "nfl_ko"))
+ym$month <- factor(ym$month)
+ym$animal_id <- factor(ym$animal_id)
+head(ym)
+```
+
+Filter out rows with a 1 in the `exclude` column.   
+
+
+```{r exclusions2}
+cat("\nrows before filter = ", nrow(ym))  # check number of rows before we filter
+ym <- dplyr::filter(ym, is.na(exclude))   # "filter all rows from bw where exclude = NA"
+cat("\nrows after filter = ", nrow(ym))   # check number of rows after we filter
+```
+
+The data were provided in long format so we don't need to "melt" it.  
+
+We can plot the data to get a sense of what's happening, and also to check for any problems.  
+
+
+```{r}
+ggplot(ym, aes(x = month, y = velocity_cm_s, colour = genotype)) +
+  #geom_boxplot() +
+    geom_quasirandom() +
+  scale_colour_manual(values = c("black", "red")) +
+  ylab("Velocity (cm/s)") +
+  theme_bw()
+```
+
+Looks like a couple of outliers, here's how to remove them (if you should?)  
+
+```{r}
+ym <- dplyr::filter(ym, velocity_cm_s < 50)
+```
+```{r}
+ggplot(ym, aes(x = month, y = velocity_cm_s, colour = genotype)) +
+  #geom_boxplot() +
+    geom_quasirandom() +
+  scale_colour_manual(values = c("black", "red")) +
+  ylab("Velocity (cm/s)") +
+  theme_bw()
+```
+
+
+```{r descriptive plots2}
+ggplot(ym, aes(x = month, y = distance_travelled_cm, colour = genotype)) +
+  #geom_boxplot() +
+    geom_quasirandom() +
+  scale_colour_manual(values = c("black", "red")) +
+  ylab("Distance travelled (cm)") +
+  theme_bw()
+```
+
+Outlier?  
+
+
+
+### Analysis
+
+
+```{r}
+m1 <- lmer(velocity_cm_s ~ genotype + month + (1|animal_id), ym)
+round(summary(m1)$coefficients, 3)
+confint(m1)
+anova(m1)
+```
+
+
+```{r}
+qqnorm(resid(m1))
+qqline(resid(m1))
+
+```
+
+
+```{r}
+m2 <- lmer(distance_travelled_cm ~ genotype + month + (1|animal_id), ym)
+round(summary(m2)$coefficients, 3)
+confint(m2)
+anova(m2)
+```
+
+```{r}
+qqnorm(resid(m2))
+qqline(resid(m2))
+```
+
+```{r}
+m3 <- lmer(cumulative_duration_novel_arm_sec  ~ genotype + month + (1|animal_id), ym)
+round(summary(m3)$coefficients, 3)
+confint(m3)
+anova(m3)
+```
+
+```{r}
+qqnorm(resid(m3))
+qqline(resid(m3))
+```
+
+
+And so on...   
+
